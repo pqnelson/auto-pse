@@ -1,29 +1,51 @@
+;;;; This file is part of auto-pse.
+;;;;
+;;;; auto-pse is free software: you can redistribute it and/or modify
+;;;; it under the terms of the GNU General Public License as published by
+;;;; the Free Software Foundation, either version 3 of the License, or
+;;;; (at your option) any later version.
+;;;;
+;;;; auto-pse is distributed in the hope it will be useful,
+;;;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;;;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;;;; GNU general Public License for more details.
+;;;;
+;;;; You should have received a copy of the GNU General Public License
+;;;; along with auto-pse. If not, see <https://www.gnu.org/licenses>
 (defpackage #:auto-pse.simplify-tests
   (:use #:cl #:rove #:auto-pse.simplify))
 (in-package #:auto-pse.simplify-tests)
 
-(deftest test-simplify-for-zeroes
-  (ok (zerop (let ((auto-pse.simplify::*cached?* nil))
-               (simplify '(* a b 0 c d)))))
-  (ok (equal (let ((auto-pse.simplify::*cached?* nil))
-               (simplify '(+ a b 0 c d)))
-             '(+ a b c d)))
-  (ok (equal (let ((auto-pse.simplify::*cached?* nil))
-               (simplify '(+ a 0 b 0 c 0 d 0)))
-             '(+ a b c d))))
+(deftest test-algebra-rules
+  (testing "simplify zeroes"
+    (ok (zerop (let ((auto-pse.simplify::*cached?* nil))
+                 (simplify '(* a b 0 c d)
+                           auto-pse.simplify::*algebra-rules*))))
+    (ok (equal (let ((auto-pse.simplify::*cached?* nil))
+                 (simplify '(+ a b 0 c d)
+                           auto-pse.simplify::*algebra-rules*))
+               '(+ a b c d)))
+    (ok (equal (let ((auto-pse.simplify::*cached?* nil))
+                 (simplify '(+ a 0 b 0 c 0 d 0)
+                           auto-pse.simplify::*algebra-rules*))
+               '(+ a b c d))))
+  (testing "arithmetic"
+    (ok (equalp (let ((auto-pse.simplify::*cached?* nil))
+                  (simplify '(+ a b 3 c d 4 x y)
+                            auto-pse.simplify::*algebra-rules*))
+                '(+ 7 a b c d x y)))
+    
+    (ok (= (let ((auto-pse.simplify::*cached?* nil))
+             (simplify '(+ 5 3 4)
+                       auto-pse.simplify::*algebra-rules*))
+           12))
+    
+    (ok (= (let ((auto-pse.simplify::*cached?* nil))
+             (simplify '(- 5 3 4)
+                       auto-pse.simplify::*algebra-rules*))
+           -2))))
 
-(deftest simplify-with-arithmetic
-  (ok (equal (let ((auto-pse.simplify::*cached?* nil))
-               (simplify '(+ a b 3 c d 4 x y)))
-             '(+ a b c d x y 7)))
 
-  (ok (= (let ((auto-pse.simplify::*cached?* nil))
-           (simplify '(+ 5 3 4)))
-         12))
-  
-  (ok (= (let ((auto-pse.simplify::*cached?* nil))
-           (simplify '(- 5 3 4)))
-         -2)))
 
 ;; expt-simplify-rules should not simplify the exponent, *algebra-rules*
 ;; will be responsible for that
@@ -48,19 +70,29 @@
                 (simplify '(* a b (expt a 4))
                           auto-pse.simplify::*expt-simplify-rules*))
               '(* b (expt a (+ 4 1)))))
-  (ok (equalp (let ((auto-pse.simplify::*cached?* nil))
-                (simplify '(* a (expt x m) b (/ c (* g x)) d)
-                          auto-pse.simplify::*expt-simplify-rules*))
-              '(* A (EXPT X (- M 1)) B (/ C (* G)) D)))
-  (ok (equalp (let ((auto-pse.simplify::*cached?* nil))
-                (simplify '(* a (expt x m) b (/ c (* g (expt x n))) d)
-                          auto-pse.simplify::*expt-simplify-rules*))
-              '(* A (EXPT X (- M N)) B (/ C (* G 1)) D)))
-  (ok (equalp (let ((auto-pse.simplify::*cached?* nil))
-                (simplify '(* a (expt x m) b (/ c (* g (expt (* h x k) n))) d)
-                          auto-pse.simplify::*expt-simplify-rules*))
-              '(* A (EXPT X (- M N)) B (/ C (* G (EXPT (* 1 H K) N))) D)))
-  )
+  (testing "form expt"
+    (ok (equalp (let ((auto-pse.simplify::*cached?* nil))
+                  (simplify '(* a b b d)
+                            auto-pse.simplify::*expt-simplify-rules*))
+                '(* a (expt b 2) d)))
+    (ok (equalp (let ((auto-pse.simplify::*cached?* nil))
+                  (simplify '(* a b c b d)
+                            auto-pse.simplify::*expt-simplify-rules*))
+                '(* a b c b d))))
+  (testing "divide expt by var cases"
+    (ok (equalp (let ((auto-pse.simplify::*cached?* nil))
+                  (simplify '(* a (expt x m) b (/ c (* g x)) d)
+                            auto-pse.simplify::*expt-simplify-rules*))
+                '(* A (EXPT X (- M 1)) B (/ C (* G)) D)))
+    (ok (equalp (let ((auto-pse.simplify::*cached?* nil))
+                  (simplify '(* a (expt x m) b (/ c (* g (expt x n))) d)
+                            auto-pse.simplify::*expt-simplify-rules*))
+                '(* A (EXPT X (- M N)) B (/ C (* G 1)) D)))
+    (ok (equalp (let ((auto-pse.simplify::*cached?* nil))
+                  (simplify '(* a (expt x m) b (/ c (* g (expt (* h x k) n))) d)
+                            auto-pse.simplify::*expt-simplify-rules*))
+                '(* A (EXPT X (- M N)) B (/ C (* G (EXPT (* 1 H K) N))) D)))
+    ))
 
 (deftest test-double-negation-rules
   (ok (equalp (let ((auto-pse.simplify::*cached?* nil))

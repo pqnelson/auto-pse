@@ -1,7 +1,7 @@
 (defsystem "auto-pse"
   :version "0.1.0"
   :author "Alex Nelson"
-  :license "MIT License"
+  :license "GPL3 License"
   :depends-on ()
   :components ((:module "src"
                 :components
@@ -13,7 +13,7 @@
 
 (defsystem "auto-pse/tests"
   :author "Alex Nelson"
-  :license "MIT License"
+  :license "GPL3 License"
   :depends-on ("auto-pse"
                "rove")
   :components ((:module "tests"

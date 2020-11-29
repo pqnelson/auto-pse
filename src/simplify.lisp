@@ -1,3 +1,17 @@
+;;;; This file is part of auto-pse.
+;;;;
+;;;; auto-pse is free software: you can redistribute it and/or modify
+;;;; it under the terms of the GNU General Public License as published by
+;;;; the Free Software Foundation, either version 3 of the License, or
+;;;; (at your option) any later version.
+;;;;
+;;;; auto-pse is distributed in the hope it will be useful,
+;;;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;;;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;;;; GNU general Public License for more details.
+;;;;
+;;;; You should have received a copy of the GNU General Public License
+;;;; along with auto-pse. If not, see <https://www.gnu.org/licenses>
 (defpackage #:auto-pse.simplify
   (:use #:cl #:auto-pse.match)
   (:export simplify)
@@ -85,38 +99,40 @@ restriction."
 ;; (satisfies-rule-predicate? '(1 2))
 ;; (not (satisfies-rule-predicate? '(1 2 nil)))
 
-(setq *algebra-rules*
-      '(((+ (?? x) 0 (?? y))
-         (+ (?? x) (?? y)))
-        ((- (?? x) 0 (?? y))
-         (- (?? x) (?? y)))
-        ((* (?? x) 1 (?? y))
-         (* (?? x) (?? y)))
-        ((* (?? x) 0 (?? y))
-         0)
-        ((* (?? a1) (? x numberp) (?? a2) (? y numberp) (?? a3))
-         (* (?? a1) (?? a2) (?? a3) (:eval (* (? x) (? y)))))
-        ((+ (?? a1) (? x numberp) (?? a2) (? y numberp) (?? a3))
-         (+ (?? a1) (?? a2) (?? a3) (:eval (+ (? x) (? y)))))
-        ((- (?? a1 consp) (? x numberp) (?? a2) (? y numberp) (?? a3))
-         (- (?? a1) (?? a2) (?? a3) (:eval (+ (? x) (? y)))))
-        ((- (? x numberp) (?? a1 consp) (? y numberp) (?? a2))
-         (- (:eval (- (? x) (? y))) (?? a1) (?? a2)))
-        ((- (? x numberp) (?? a1) (? y numberp) (?? a2 consp))
-         (- (:eval (- (? x) (? y))) (?? a1) (?? a2)))
-        ((- (? x numberp) (? y numberp))
-         (:eval (- (? x) (? y))))
-        ((* (? x))
-         (? x))
-        ((+ (? x))
-         (? x))
-        ((/ (?? x) 1)
-         (?? x))
-        ))
+(defparameter *algebra-rules*
+  '(((+ (?? x) 0 (?? y))
+     (+ (?? x) (?? y)))
+    ((- (?? x) 0 (?? y))
+     (- (?? x) (?? y)))
+    ((* (?? x) 1 (?? y))
+     (* (?? x) (?? y)))
+    ((* (?? x) 0 (?? y))
+     0)
+    ((* (?? a1) (? x numberp) (?? a2) (? y numberp) (?? a3))
+     (* (:eval (* (? x) (? y))) (?? a1) (?? a2) (?? a3)))
+    ((+ (?? a1) (? x numberp) (?? a2) (? y numberp) (?? a3))
+     (+ (:eval (+ (? x) (? y))) (?? a1) (?? a2) (?? a3)))
+    ((- (?? a1 consp) (? x numberp) (?? a2) (? y numberp) (?? a3))
+     (- (?? a1) (?? a2) (?? a3) (:eval (+ (? x) (? y)))))
+    ((- (? x numberp) (?? a1 consp) (? y numberp) (?? a2))
+     (- (:eval (- (? x) (? y))) (?? a1) (?? a2)))
+    ((- (? x numberp) (?? a1) (? y numberp) (?? a2 consp))
+     (- (:eval (- (? x) (? y))) (?? a1) (?? a2)))
+    ((- (? x numberp) (? y numberp))
+     (:eval (- (? x) (? y))))
+    ((* (? x))
+     (? x))
+    ((+ (? x))
+     (? x))
+    ((/ (?? x) 1)
+     (?? x))
+    ))
 
 (defun nonzero? (x)
   (not (zerop x)))
 
+;; TODO: matrix multiplication is not commutative, so we should make sure the
+;; factors between the exponent factors can commute.
 (defparameter *expt-simplify-rules*
   '(((expt 1 (? x)) 1)
     ((expt (? x) 0)
@@ -133,6 +149,14 @@ restriction."
      (* (?? a1) (?? a2) (expt (? x) (+ (? m) 1)) (?? a3)))
     ((* (?? a1) (? x) (?? a2) (expt (? x) (? m)) (?? a3))
      (* (?? a1) (?? a2) (expt (? x) (+ (? m) 1)) (?? a3)))
+    ;; always true
+    ((* (?? a1) (? x) (? x) (?? a2))
+     (* (?? a1) (expt (? x) 2) (?? a2)))
+    ((* (?? a1) (expt (? x) (? m)) (? x) (?? a2))
+     (* (?? a1) (expt (? x) (+ (? m) 1)) (?? a2)))
+    ((* (?? a1) (expt (? x) (? m)) (expt (? x) (? n)) (?? a2))
+     (* (?? a1) (expt (? x) (+ (? m) (? n))) (?? a2)))
+    ;; eh, sometimes true
     ((* (?? a1) (expt (? x) (? m)) (?? a2)
         (/ (?? num) (* (?? d1) (? x) (?? d2)))
         (?? a3))
@@ -232,8 +256,30 @@ restriction."
        (evenp x)
        (plusp x)))
 
+;; I actually do not know if I will include octonions in this system,
+;; which has non-associative multiplication. But most of the time,
+;; multiplication is associative...not necessarily commutative (e.g.,
+;; matrix multiplication).
+(defparameter *associativity-rules*
+  '(((+ (+ (?? a1)) (?? a2) (?? a3))
+     (+ (?? a1) (?? a2) (?? a3)))
+    ((+ (?? a1) (+ (?? a2)) (?? a3))
+     (+ (?? a1) (?? a2) (?? a3)))
+    ((+ (?? a1) (?? a2) (+ (?? a3)))
+     (+ (?? a1) (?? a2) (?? a3)))
+    ;; XXX: take care if working with octonions
+    ((* (* (?? a1)) (?? a2) (?? a3))
+     (* (?? a1) (?? a2) (?? a3)))
+    ((* (?? a1) (* (?? a2)) (?? a3))
+     (* (?? a1) (?? a2) (?? a3)))
+    ((* (?? a1) (?? a2) (* (?? a3)))
+     (* (?? a1) (?? a2) (?? a3)))
+    ))
 
-(defparameter *rules* (append *algebra-rules*
+(defparameter *rules* (append *associativity-rules*
+                              *algebra-rules*
                               *expt-simplify-rules*
                               *double-negation-rules*
+                              *log-expand*
+                              *sqrt-expand*
                               *obvious-ones*))

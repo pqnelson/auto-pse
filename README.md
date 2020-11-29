@@ -21,4 +21,8 @@ For example, matrix exponentation would be something like:
 Uh, I should also probably double check I can overload built-in
 operations like this...
 
+## License
+
+All the code is under the GPL3 license, found in the LICENSE.txt file. 
+
 
