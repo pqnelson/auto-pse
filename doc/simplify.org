@@ -143,7 +143,7 @@ function, indicating the top of the =data= satisfies the restriction.
 A closure is constructed. In pidgin Common Lisp, the closure returned
 looks like:
 
-#+begin_example
+#+begin_src lisp
 (defun element-match-closure (data dictionary succeed)
   (cond
     ((not (cons? data)) :fail)
@@ -155,7 +155,7 @@ looks like:
              :fail)
            (succeed (bind variable (car data) dictionary)
                     (cdr data)))))))
-#+end_example
+#+end_src
 
 **** Matching a segment
 
