@@ -11,7 +11,7 @@ code."))
 (defparameter *cached?* nil)
 (defparameter *debug?* nil)
 
-(defun simplify (expr &optional (rules *algebra-rules*))
+(defun simplify (expr &optional (rules *rules*))
   (if *cached?*
       (or (gethash expr *simplify-cache*)
           (let ((result (simplify* expr rules)))
@@ -22,7 +22,9 @@ code."))
 (defun simplify* (expr rules &aux result)
   (setq result
         (try-matcher-rules (if (listp expr)
-                               (mapcar #'simplify expr)
+                               (mapcar (lambda (subexpr)
+                                         (simplify subexpr rules))
+                                       expr)
                                expr)
                            rules))
   (if (equal result expr)
@@ -94,7 +96,6 @@ restriction."
          0)
         ((* (?? a1) (? x numberp) (?? a2) (? y numberp) (?? a3))
          (* (?? a1) (?? a2) (?? a3) (:eval (* (? x) (? y)))))
-        ;; TODO: handle (?? a1) = (?? a2) = (?? a3) = nil
         ((+ (?? a1) (? x numberp) (?? a2) (? y numberp) (?? a3))
          (+ (?? a1) (?? a2) (?? a3) (:eval (+ (? x) (? y)))))
         ((- (?? a1 consp) (? x numberp) (?? a2) (? y numberp) (?? a3))
@@ -116,8 +117,6 @@ restriction."
 (defun nonzero? (x)
   (not (zerop x)))
 
-;; TODO: the first couple rules do not work, but it'd be nice if they did
-;; work. I should think about it...
 (defparameter *expt-simplify-rules*
   '(((expt 1 (? x)) 1)
     ((expt (? x) 0)
@@ -128,20 +127,40 @@ restriction."
      (* (?? a1) (?? a2) (?? a3)))
     ((* (?? a1) (expt (? x) (- (? m))) (?? a2) (expt (? x) (? m)) (?? a3))
      (* (?? a1) (?? a2) (?? a3)))
-    ((* (?? a1) (expt (? x) (- (? m))) (?? a2) (expt (? x) (? m)) (?? a3))
-     (* (?? a1) (?? a2) (?? a3)))
     ((* (?? a1) (expt (? x) (? m)) (?? a2) (expt (? x) (? n)) (?? a3))
      (* (?? a1) (?? a2) (expt (? x) (+ (? m) (? n))) (?? a3)))
     ((* (?? a1) (expt (? x) (? m)) (?? a2) (? x) (?? a3))
      (* (?? a1) (?? a2) (expt (? x) (+ (? m) 1)) (?? a3)))
     ((* (?? a1) (? x) (?? a2) (expt (? x) (? m)) (?? a3))
      (* (?? a1) (?? a2) (expt (? x) (+ (? m) 1)) (?? a3)))
-    ((* (?? a1) (expt (? x) (? m)) (?? a2) (/ (?? num) (* (?? d1) (? x) (?? d2))) (?? a3))
-     (* (?? a1) (expt (? x) (- (? m) 1)) (?? a2) (/ (?? num) (* (?? d1) (?? d2))) (?? a3)))
-    ((* (?? a1) (expt (? x) (? m)) (?? a2) (/ (?? num) (* (?? d1) (expt (? x) (? n)) (?? d2))) (?? a3))
-     (* (?? a1) (expt (? x) (- (? m) (? n))) (?? a2) (/ (?? num) (* (?? d1) 1 (?? d2))) (?? a3)))
-    ((* (?? a1) (expt (? x) (? m)) (?? a2) (/ (?? num) (* (?? d1) (expt (* (?? e1) (? x) (?? e2)) (? n)) (?? d2))) (?? a3))
-     (* (?? a1) (expt (? x) (- (? m) (? n))) (?? a2) (/ (?? num) (* (?? d1) (expt (* 1 (?? e1) (?? e2)) (? n)) (?? d2))) (?? a3)))
+    ((* (?? a1) (expt (? x) (? m)) (?? a2)
+        (/ (?? num) (* (?? d1) (? x) (?? d2)))
+        (?? a3))
+     (* (?? a1)
+        (expt (? x) (- (? m) 1))
+        (?? a2)
+        (/ (?? num) (* (?? d1) (?? d2))) (?? a3)))
+    ((* (?? a1)
+        (expt (? x) (? m))
+        (?? a2)
+        (/ (?? num) (* (?? d1) (expt (? x) (? n)) (?? d2)))
+        (?? a3))
+     (* (?? a1)
+        (expt (? x) (- (? m) (? n)))
+        (?? a2)
+        (/ (?? num) (* (?? d1) 1 (?? d2)))
+        (?? a3)))
+    ((* (?? a1)
+        (expt (? x) (? m))
+        (?? a2)
+        (/ (?? num)
+           (* (?? d1) (expt (* (?? e1) (? x) (?? e2)) (? n)) (?? d2)))
+        (?? a3))
+     (* (?? a1)
+        (expt (? x) (- (? m) (? n)))
+        (?? a2)
+        (/ (?? num) (* (?? d1) (expt (* 1 (?? e1) (?? e2)) (? n)) (?? d2)))
+        (?? a3)))
     ))
 
 (defparameter *double-negation-rules*
@@ -151,8 +170,19 @@ restriction."
       (* (?? a1) (?? a2) (?? a3)))
     ((* (?? a1) (- (? x)) (?? a2) -1 (?? a3))
      (* (?? a1) (? x) (?? a2) (?? a3)))
+    ((* (?? a1) -1 (?? a2) (- (? x)) (?? a3))
+     (* (?? a1) (?? a2) (? x) (?? a3)))
     ((* (?? a1) (- (? x)) (?? a2) (- (? y)) (?? a3))
      (* (?? a1) (? x) (?? a2) (? y) (?? a3)))
+    ))
+
+(defparameter *log-expand*
+  '(((log (* (? x1) (? x2) (?? xs)))
+     (+ (log (? x1)) (log (* (? x2) (?? xs)))))
+    ((log (/ (? x1) (? x2)))
+     (- (log (? x1)) (log (? x2))))
+    ((log (expt (? x) (? e)))
+     (* (? e) (log (? x))))
     ))
 
 (defparameter sqrt-factor-simplify? nil)
@@ -161,7 +191,7 @@ restriction."
   (and (not (negp (simplify x)))
        (not (negp (simplify y)))))
 
-(defparameter sqrt-expand
+(defparameter *sqrt-expand*
   '(((sqrt (* (? x) (? y)))
      (* (sqrt (? x)) (sqrt (? y))))
     ((sqrt (* (? x) (? y) (?? ys)))
@@ -178,12 +208,10 @@ restriction."
      ())
     ))
 
-
-
 (defparameter *obvious-ones*
-  '(((+ (?? a1) (expt (sin (? x)) 2) (?? a2) (expt (cos (? x)) 2) (?? a3))
+  '(((+ (?? a1) (expt (sin (? x)) (? n even-positive-integer?)) (?? a2) (expt (cos (? x)) (? n)) (?? a3))
      (+ 1 (?? a1) (?? a2) (?? a3)))
-    ((+ (?? a1) (expt (cos (? x)) 2) (?? a2) (expt (sin (? x)) 2) (?? a3))
+    ((+ (?? a1) (expt (cos (? x)) (? n even-positive-integer?)) (?? a2) (expt (sin (? x)) (? n)) (?? a3))
      (+ 1 (?? a1) (?? a2) (?? a3)))
     ))
 
@@ -199,7 +227,13 @@ restriction."
   (and (integerp x)
        (oddp x)))
 
-(defun even-nonzero-integer? (x)
+(defun even-positive-integer? (x)
   (and (integerp x)
        (evenp x)
-       (not (zerop x))))
+       (plusp x)))
+
+
+(defparameter *rules* (append *algebra-rules*
+                              *expt-simplify-rules*
+                              *double-negation-rules*
+                              *obvious-ones*))
