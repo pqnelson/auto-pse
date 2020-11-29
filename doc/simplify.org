@@ -1,0 +1,302 @@
+#+TITLE: Simplification Mechanism
+#+AUTHOR: Alex Nelson
+#+EMAIL: pqnelson@gmail.com
+#+LANGUAGE: en
+#+OPTIONS: H:5
+#+HTML_DOCTYPE: html5
+# Created Thursday November 26, 2020 at  9:13AM
+
+* Introduction
+
+The goal is to extend Common Lisp to handle pattern matching, in the
+technical sense as discussed in /PAIP/ or /Building Problem Solvers/:
+a glorified "find/replace" mechanism. The latter source is closer to my
+ambitions, since it's based on Sussman's SCMUTILS matcher.
+
+* Matching Algorithm
+
+See /Building Problem Solvers/, pp. 46 /et seq./ in the print book
+(pp. 64 /et seq./ of the PDF), for their discussion of pattern matching
+and substitution algorithms. They were inspired by Sussman's SCMUTILS
+code, so I'll look at that first.
+
+I quickly make note that there are three functions which seem to be
+useful elsewhere; i.e., if we make a package for pattern matching
+routines, we should export:
+1. =match= (which returns a dictionary of bindings)
+2. =substitute-in= (which takes an expression involving pattern
+   variables, and a dictionary of bindings, then substitutes in the values)
+3. =fail?= which tests if the result of =match= failed or not (since
+   there is no =false= value in Common Lisp, we are forced to include
+   this helper function).
+
+** SCMUTILS
+
+(It seems like lecture 4A of MIT 6.001 "Structure and Interpretation of
+Computer Programs" course, discusses the general structure of pattern
+matching. I don't think it appeared in the book, sadly.)
+
+Examples of pattern matching and substitution are stored in the
+=rules.scm= file, where we find things like:
+
+#+begin_src scheme
+   ( (sqrt (expt (? x) (? n odd-positive-integer?)))
+     (and sqrt-expt-simplify? ;; condition for applying rule
+	  (let ((xs (rcf:simplify x)))
+	     (assume! `(= (sqrt (expt ,xs ,n))
+                          (expt ,xs ,(quotient (fix:- n 1) 2)))
+                      'simsqrt2)))
+     (* (sqrt (: x)) (expt (: x) (: (quotient (fix:- n 1) 2)))) )
+
+   ( (expt (sqrt (? x)) (? n odd-integer?)) ;; (? n odd?) is a restricted variable
+     none
+     (* (sqrt (: x)) (expt (: x) (: (quotient (fix:- n 1) 2)))) )
+   
+   ( (/ (? x) (sqrt (? x)))
+     none
+     (sqrt (: x)) )
+
+   ( (/ (sqrt (? x)) (? x))
+     none
+     (/ 1 (sqrt (: x))) )
+
+   ( (/ (* (?? u) (? x) (?? v)) (sqrt (? x)))
+     none
+     (* (:: u) (sqrt (: x)) (:: v)) )
+#+end_src
+
+There are two types of pattern variables, namely:
+1. element variables, which match a single item
+2. segment variables, which match several items ("zero or more")
+
+We use these pattern variables in an S-expression, which we generically
+refer to as a "pattern".
+
+*** syntax.scm
+
+This defines =rule-system= macro to call =rule-simplifier=. We use
+=rule-system= in =rule.scm=, where we define a number of reduction
+relations, and iteratively apply the simplification rules using the
+=full-simplify= function (in =rules.scm=).
+
+*** rule-simplifier.scm
+
+The =rule-simplifier= is a factory returning a =simplify-expression=
+function. It delegates applying the rules to =try-rules=. If no rule
+applies, it looks like the =simplify-expression= function returns false.
+
+In turn, =try-rules= loops through each rule and tries applying it. A
+rule either succeeds or returns =#f= (false). The loop terminates when
+it finds a rule that succeeds, returning the result of applying a rule
+to the expression. If no rule applies, it returns false.
+
+The =rule:make= function creates a matcher-combinator using
+=match:->combinators=. The combinator is stored in the local variable
+=matcher= and then =rule:make= returns a closure wrapping around
+=(matcher (list expr) '() continuation)=.
+
+*** matcher.scm
+
+The star of the show, =match:->combinators=, returns a function which
+dispatches by the sort of pattern we're working against.
+
+#+begin_src scheme
+(define (match:->combinators pattern)
+  (define (compile pattern)
+    (cond ((match:element? pattern)
+	   (if (match:restricted? pattern)
+	       (match:element (match:variable-name pattern)
+			      (match:restriction pattern))
+	       (match:element (match:variable-name pattern))))
+	  ((match:segment? pattern)
+	   (match:segment (match:variable-name pattern)))
+	  ((match:reverse-segment? pattern)
+	   (match:reverse-segment (match:variable-name pattern)))
+	  ((null? pattern) (match:eqv '()))
+	  ((list? pattern)
+	   (apply match:list (map compile pattern)))
+	  (else (match:eqv pattern))))
+  (compile pattern))
+#+end_src
+
+A match procedure takes:
+- a data item;
+- a dictionary, an =alist= accumulating the assignments of match
+  variables to values found in the data; and
+- a success continuation, a procedure which takes two arguments (the new
+  dictionary and the tail of the list resulting from matching its
+  initial segment).
+
+Whereas Scheme has a =#f= false value to return upon failure, Common
+Lisp puns on =nil= being false. This complicates the Common Lisp
+picture. We use =:fail= as the constant reflecting failure.
+
+The predicates =match:element?= and friends are defined in =rule-syntax.scm=.
+
+**** Matching an element
+
+The =match:element= expects a pattern variable and an optional
+=restriction?= predicate to test the head of the =data= S-expression.
+The default value of =restriction?= is a =(lambda (x) #t)= constant
+function, indicating the top of the =data= satisfies the restriction.
+
+A closure is constructed. In pidgin Common Lisp, the closure returned
+looks like:
+
+#+begin_example
+(defun element-match-closure (data dictionary succeed)
+  (cond
+    ((not (cons? data)) :fail)
+    ((not (restriction? (car data))) :fail)
+    (t (let ((vcell (lookup variable dictionary)))
+         (if vcell
+           (if (= (value vcell) (car data))
+             (succeed dictionary (cdr data))
+             :fail)
+           (succeed (bind variable (car data) dictionary)
+                    (cdr data)))))))
+#+end_example
+
+**** Matching a segment
+
+For =match:segment=, the closure is immediately constructed.
+- If =data= is not a list (including =nil=), it fails immediately
+- If the pattern variable is already bound in the =dictionary=,
+  then we try to scan the data to fit the top of the =data= to the value
+  of the variable found in the dictionary. If this works, we call the
+  continuation; otherwise we have failed. (This is again a loop.)
+  + This branch amounts to checking the segment matches what we have
+    stored in our dictionary.
+- The remaining case, the pattern variable is not bound in the
+  dictionary, Sussman uses a named-let to loop through the elements in
+  the =data=. Specifically:
+  + Call the =succeed= continuation on the new dictionary obtained by
+    binding the pattern variable to the segment between the top of the
+    data and the current iterator. If this works, use this.
+  + Otherwise, iterate to the next item in the =data=, and try this loop
+    all over again.
+
+
+*** rule-syntax.scm
+
+The =rule:compile= produces a (quasi-quoted) list
+=(rule:make pattern-expression consequent-expression)= where the rules
+defined in =rules.scm= are triples of the form
+=(pattern predicate consequent-skeleton)=
+or pairs of the form =(pattern consequent-skeleton)=. I call the last
+component the "consequent skeleton" because we form a function out of it
+using the pattern variables. (This is how substitution appears to be
+done for pattern variables.)
+
+* Trace
+
+** Correct
+
+#+begin_example
+SIMPLIFY> (match '(+ (?? x) 0 (?? y)) '(+ a b 0 c d) nil)
+
+ (eq pattern data) +
+ Matched t, new-bindings: NIL
+           (cdr pattern): ((?? X) 0 (?? Y))
+              (cdr data): (A B 0 C D)
+ Match (pattern-segment? (car pattern): ((?? X) 0 (?? Y))
+ Matched (not (consp pattern)): 0
+ Matched t, new-bindings: FAIL
+           (cdr pattern): ((?? Y))
+              (cdr data): (B 0 C D)
+ Matched (not (consp pattern)): 0
+ Matched t, new-bindings: FAIL
+           (cdr pattern): ((?? Y))
+              (cdr data): (0 C D)
+ (eq pattern data) 0
+ Matched t, new-bindings: ((X ((A B 0 C D) (0 C D))))
+           (cdr pattern): ((?? Y))
+              (cdr data): (C D)
+ Match (pattern-segment? (car pattern): ((?? Y))
+ Matched (not (consp pattern)): NIL
+ Matched (not (consp pattern)): NIL
+ (eq pattern data) NIL
+((Y ((C D) NIL)) (X ((A B 0 C D) (0 C D))))
+SIMPLIFY> 
+#+end_example
+
+** Incorrect
+
+#+begin_example
+ (eq pattern data) +
+ Matched t, new-bindings: NIL
+           (cdr pattern): ((?? X) 0 (?? Y))
+              (cdr data): (A B 0 C D)
+ Match (pattern-segment? (car pattern): ((?? X) 0 (?? Y))
+ Matched (not (consp pattern)): 0
+ Matched t, new-bindings: FAIL
+           (cdr pattern): ((?? Y))
+              (cdr data): (B 0 C D)
+ Matched (not (consp pattern)): 0
+ Matched t, new-bindings: FAIL
+           (cdr pattern): ((?? Y))
+              (cdr data): (0 C D)
+ (eq pattern data) 0
+ Matched t, new-bindings: ((X ((A B 0 C D) (0 C D))))
+           (cdr pattern): ((?? Y))
+              (cdr data): (C D)
+ Match (pattern-segment? (car pattern): ((?? Y))
+ Matched (not (consp pattern)): NIL
+ Matched (not (consp pattern)): NIL
+ (eq pattern data) NIL
+((Y ((C D) NIL)) (X ((A B 0 C D) (0 C D))))
+#+end_example
+
+* Finding Simplification Rules
+
+Now that we have a rule matching function with a substitution mechanism,
+how do we generate the simplification rules? The honest answer: they
+emerge as we write more code.
+
+** Example from Implementing Differentiation
+
+For example, when writing rules for differentiating trigonometric
+functions, we know
+
+#+begin_example
+(equalp (derivative '(sin x) 'x)
+        '(- (cos x)))
+#+end_example
+
+But it would be nice if we also had:
+
+#+begin_example
+(equalp (derivative (derivative '(sin x) 'x) 'x)
+        '(sin x))
+#+end_example
+
+Instead, we would get:
+
+#+begin_example
+(equalp (derivative (derivative '(sin x) 'x) 'x)
+        '(- (- (cos x))))
+#+end_example
+
+This motivates adding the following rule:
+
+#+begin_example
+;; double negation rule
+((- (- (? x)))
+ (? x))
+#+end_example
+
+A moment's consideration would lead us to realize we also have the
+following cases:
+
+#+begin_example
+((* (?? a1) -1 (?? a2) -1 (?? a3))
+ (* (?? a1) (?? a2) (?? a3)))
+
+((* (?? a1) (- (? x)) (?? a2) -1 (?? a3))
+ (* (?? a1) (? x) (?? a2) (?? a3)))
+
+((* (?? a1) (- (? x)) (?? a2) (- (? y)) (?? a3))
+ (* (?? a1) (? x) (?? a2) (? y) (?? a3)))
+#+end_example
+
+

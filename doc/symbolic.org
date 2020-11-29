@@ -1,0 +1,146 @@
+#+TITLE: Symbolic Computation
+#+AUTHOR: Alex Nelson
+#+EMAIL: pqnelson@gmail.com
+#+LANGUAGE: en
+#+OPTIONS: H:5
+#+HTML_DOCTYPE: html5
+# Created Saturday November 28, 2020 at  2:00PM
+
+* Overview
+
+*Topics:* Differential and integral calculus will be discussed here.
+
+** Algorithms
+
+*** Symbolic Manipulation
+
+Using the pattern matching algorithm (as discussed in =simplify.org=) we
+can implement symbolic computation of derivatives and integrals. This
+is a slight variation to the symbolic differentiation algorithm discussed
+in SICP (2.3.2, also discussed in exercise 2.73 of section 2.4.3).
+
+*** Automatic Differentiation via Dual Numbers
+
+The alternative to symbolic computation is automatic differentiation. If
+I recall correctly, SCMUTILS uses forward automatic differentiation (in
+~kernel/diff.scm~ and ~kernel/deriv.scm~). The strategy as I understand
+it is to introduce the dual number system.
+
+Borrowing terminology from Bryce De Witt's /Supermanifolds/, a dual
+number consists of a "body" and a "soul":
+
+#+begin_src lisp
+(defclass dual-number ()
+  ((body :type number
+         :initform 0
+         :initarg :body
+         :accessor dual-body)
+   (soul :type number
+         :initform 0
+         :initarg :soul
+         :accessor dual-soul)))
+#+end_src
+
+Dual numbers should be thought of having an infinitesimal soul, i.e.,
+
+#+begin_src lisp
+(let ((x (make-instance 'dual-number :soul 33)))
+  (= 0 (* x x)))
+;; => T
+#+end_src
+
+This is because we define multiplication of dual numbers:
+
+#+begin_src lisp
+(defmethod multiply ((x dual-number) (y dual-number))
+  (let ((prod-body (* (dual-body x) (dual-body y)))
+        (prod-soul (* (dual-soul x) (dual-soul y))))
+    (if (zero? prod-soul)
+        prod-body
+        (make-instance 'dual-number
+                       :body prod-body
+                       :soul prod-soul))))
+#+end_src
+
+Adding or subtracting dual numbers is done component-wise. Division
+amounts to:
+
+#+begin_src lisp
+(defmethod divide ((x dual-number) (y number))
+  (make-instance 'dual-number
+                 :body (/ (dual-body x) y)
+                 :soul (/ (dual-soul x) y)))
+
+(defmethod divide ((x dual-number) (y dual-number))
+  (let ((sq (lambda (u) (* u u)))
+        (y-bar (make-instance 'dual-number
+                              :body (dual-body y)
+                              :soul (- (dual-soul y)))))
+    (/ (multiply x y-bar)
+       (sq (dual-body y)))))
+#+end_src
+
+#+begin_puzzle
+*Puzzle.*
+We can extend dual numbers to handle multivariate calculus. We just let
+the body and soul be vectors. The soul for a function is then the
+gradient in the direction of the soul of its argument, evaluated at the
+body of its argument.
+
+What if we let the body and soul be real-valued functions? Can we get
+functional differentiation using "dual-numbers over smooth functions"?
+(End of Puzzle)
+#+end_puzzle
+
+* Differentiation
+
+** Rules
+
+I decided to imitate Mathematica's notation, and use ~d~ for the
+derivative function; i.e., ~(d f x)~ is the derivative of ~f~ with
+respect to ~x~. The rules used are:
+
+- Basic rules:
+  - ~(d x x) == 1~ and,
+    if ~y~ is another symbol not equal to ~x~,
+     ~(d y x) == 0~
+  - ~(d (+ u v) x) == (+ (d u x) (d v x))~
+  - ~(d (* u v) x) == (+ (* (d u x) v) (* u (d v x)))~
+    - Special case: skip differentiating constants
+    - Corollary: ~(d (expt u n) x) == (* n (d u x) (expt u (1- n)))~ if
+      ~n~ is a number.
+  - ~(d (/ u v) x) == (+ (/ (d u x) v) (* -1 u (d v x) (expt v -2)))~
+    - Special case: ~(d (/ 1 u)) == (* -1 (d u) (expt u -2))~
+  - ~(d (log u) x) == (/ (d u x) u)~
+  - ~(d (exp u) x) == (* (d u x) (exp u))~
+  - Generalized product rule: ~(d (expt u v) x) == (* (expt u v) (d (* v (log u)) x))~
+    for $u > 0$
+  - ~(d (sqrt u) x) == (* 1/2 (d u x) (expt u -1/2))~
+- Trigonometric Functions
+  - ~(d (sin u) x) == (* (d u x) (cos u))~
+  - ~(d (cos u) x) == (* -1 (d u x) (sin u))~
+  - ~(d (tan u) x) == (* (d u x) (expt (sec u) 2))~
+  - ~(d (cot u) x) == (* -1 (d u x) (expt (csc u) 2))~
+  - ~(d (sec u) x) == (* (d u x) (sec u) (tan u))~
+  - ~(d (csc u) x) == (* -1 (d u x) (csc u) (cot u))~
+- Inverse trigonometric functions
+  - ~(d (asin u) x) == (* (d u x) (expt (- 1 (* u u)) -1/2))~
+  - ~(d (acos u) x) == (* -1 (d u x) (expt (- 1 (* u u)) -1/2))~
+  - ~(d (atan u) x) == (* (d u x) (expt (+ 1 (* u u)) -1))~
+  - ~(d (acot u) x) == (* -1 (d u x) (expt (+ 1 (* u u)) -1))~
+  - ~(d (asec u) x) == (* (d u x) (expt (* (abs u) (sqrt (- (* u u) 1))) -1))~
+  - ~(d (acsc u) x) == (* -1 (d u x) (expt (* (abs u) (sqrt (- (* u u) 1))) -1))~
+- Hyperbolic Trigonometric Functions
+  - ~(d (sinh u) x) == (* (d u x) (cosh u))~
+  - ~(d (cosh u) x) == (* (d u x) (sinh u))~
+  - ~(d (tanh u) x) == (* (d u x) (expt (sech u) 2))~
+  - ~(d (sech u) x) == (* -1 (d u x) (tanh u) (sech u))~
+  - ~(d (coth u) x) == (* -1 (d u x) (expt (csch u) 2))~
+  - ~(d (csch u) x) == (* -1 (d u x) (coth u) (csch u))~
+
+* References
+
+- Richard Fateman, "Building Algebra Systems by Overloading Lisp"
+  and the follow-up paper "Building Algebra Systems by Overloading Lisp:
+  Automatic Differentiation".
+- Bryce DeWitt, /Supersymmetry/. Cambridge University Press.

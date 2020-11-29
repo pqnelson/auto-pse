@@ -1,0 +1,59 @@
+#+TITLE: Trigonometric Functions
+#+AUTHOR: Alex Nelson
+#+EMAIL: pqnelson@gmail.com
+#+LANGUAGE: en
+#+OPTIONS: H:5
+#+HTML_DOCTYPE: html5
+# Created Thursday November 26, 2020 at  9:02AM
+
+* Introduction
+
+Following Sussman's SCMUTILS, I'm trying to extend Common Lisp to handle
+some degree of computer algebra.
+  
+I'm working through /Common Lisp the Language/, second ed., and the
+definitions of trigonometric functions are straightforward. 
+
+* Inverse Trigonometric Functions
+
+The inverse trigonometric functions are defined (in section 12.2) as:
+  
+#+begin_example
+(defconstant i #C(0 1))
+
+(defun arcsin (z)
+  (labels ((sq (x) (* x x)))
+     (* i
+        (log (+ (* i z)
+                (sqrt (- 1 (sq z))))))))
+
+(defun arccos (z)
+  (- (/ pi 2) (arcsin z)))
+#+end_example
+
+But the =arccos= is equivalent to:
+
+#+begin_example
+(defun arccos1 (z)
+  (* (- i)
+     (log (+ z
+             (* i (sqrt (- 1 (* z z))))))))
+
+(defun arccos2 (z)
+  (* (/ 2 i)
+     (log (+ (sqrt (/ (1+ z) 2))
+             (* i (sqrt (/ (- 1 z) 2)))))))
+#+end_example
+
+The one-argument Arc-Tangent formula
+
+#+begin_example
+(defun arctan (z)
+  (let ((iz (* i z)))
+    (/ (- (log (1+ iz))
+          (log (- 1 iz)))
+       (* 2 i))))
+#+end_example
+
+We need to be careful with these functions, because the branch cuts
+hinder naive simplification.

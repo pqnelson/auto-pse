@@ -1,0 +1,252 @@
+#+TITLE: Notes on Generic Arithmetic
+#+AUTHOR: Alex Nelson
+#+EMAIL: pqnelson@gmail.com
+#+LANGUAGE: en
+#+OPTIONS: H:5
+#+HTML_DOCTYPE: html5
+# Created Saturday November 28, 2020 at  9:57AM
+
+* Overloading binary operators
+
+The first thought that came to mind is to simply overload addition,
+subtraction, multiplication, etc. This is what happens in Ginac (written
+in C++). Richard Fateman wrote a couple articles about this strategy,
+sketching out some implementation ideas. He has some code available
+[[https://people.eecs.berkeley.edu/~fateman/generic/][online]], perhaps most relevant is =ga.lisp= (and =df.lisp= contains the
+automatic differentiation code).
+
+** Fateman's Approach
+
+The basic strategy Fateman implements is to use a generic method for
+each arithmetical operator:
+
+#+begin_src lisp
+(defgeneric two-arg-+ (arg1 arg2))
+(defmethod two-arg-+ ((arg1 number) (arg2 number))
+  (cl::+ arg1 arg2))
+#+end_src
+
+But since this is repeated four times, it's wrapped in a =defarithmetic=
+macro.
+
+Then we use a =twobytwo= macro which transforms =(twobytwo f (a b c))=
+into =(f (f a b) c)=. There's some syntactic sugar here, a keyword
+optional parameter for the case when no arguments are given, another
+keyword optional parameter for the case when only a single argument is
+given.
+
+Finally, we introduce macros for the binary operators
+
+#+begin_src lisp
+(defmacro + (&rest args) `(twobytwo two-arg-+ ,args 0 ,(car args)))
+;; etc.
+#+end_src
+
+* Built-in Arithmetic: How is it done?
+
+** Function Signatures
+
+Just noting to myself, the syntax for arithmetic operators are
+(according to CLHS 12.2):
+
+#+begin_src lisp
+(defun + (&rest numbers))
+
+(defun - (x &rest numbers))
+
+(defun * (&rest numbers))
+
+(defun / (numerator &rest denominators))
+#+end_src
+
+The comparison operators
+
+#+begin_src lisp
+(defun <= (&rest numbers))
+(defun < (&rest numbers))
+(defun = (&rest numbers))
+(defun /= (&rest numbers))
+(defun >= (&rest numbers))
+(defun > (&rest numbers))
+#+end_src
+** ...in SBCL
+
+In =sbcl/src/code/numbers.lisp= the arithmetic operators are defined.
+They're what we might expect:
+
+#+begin_src lisp
+;;;; arithmetic operations
+;;;;
+;;;; IMPORTANT NOTE: Accessing &REST arguments with NTH is actually extremely
+;;;; efficient in SBCL, as is taking their LENGTH -- so this code is very
+;;;; clever instead of being charmingly naive. Please check that "obvious"
+;;;; improvements don't actually ruin performance.
+;;;;
+;;;; (Granted that the difference between very clever and charmingly naivve
+;;;; can sometimes be sliced exceedingly thing...)
+
+(macrolet ((define-arith (op init doc)
+             `(defun ,op (&rest numbers)
+                (declare (explicit-check))
+                ,doc
+                (if numbers
+                    (let ((result (the number (fast-&rest-nth 0 numbers))))
+                      (do-rest-arg ((n) numbers 1 result)
+                        (setq result (,op result n))))
+                    ,init))))
+  (define-arith + 0
+    "Return the sum of its arguments. With no args, returns 0.")
+  (define-arith * 1
+    "Return the product of its arguments. With no args, returns 1."))
+
+(defun - (number &rest more-numbers)
+  "Subtract the second and all subsequent arguments from the first;
+  or with one argument, negate the first argument."
+  (declare (explicit-check))
+  (if more-numbers
+      (let ((result number))
+        (do-rest-arg ((n) more-numbers 0 result)
+          (setf result (- result n))))
+      (- number)))
+
+(defun / (number &rest more-numbers)
+  "Divide the first argument by each of the following arguments, in turn.
+  With one argument, return reciprocal."
+  (declare (explicit-check))
+  (if more-numbers
+      (let ((result number))
+        (do-rest-arg ((n) more-numbers 0 result)
+          (setf result (/ result n))))
+      (/ number)))
+
+(defun 1+ (number)
+  "Return NUMBER + 1."
+  (declare (explicit-check))
+  (1+ number))
+
+(defun 1- (number)
+  "Return NUMBER - 1."
+  (declare (explicit-check))
+  (1- number))
+
+(defmacro two-arg-+/- (name op big-op)
+  `(defun ,name (x y)
+     (number-dispatch ((x number) (y number))
+       (bignum-cross-fixnum ,op ,big-op)
+       (float-contagion ,op x y)
+
+       ((complex complex)
+        (canonical-complex (,op (realpart x) (realpart y))
+                           (,op (imagpart x) (imagpart y))))
+       (((foreach bignum fixnum ratio single-float double-float
+                  #+long-float long-float) complex)
+        (complex (,op x (realpart y)) (,op 0 (imagpart y))))
+       ((complex (or rational float))
+        (complex (,op (realpart x) y) (,op (imagpart x) 0)))
+
+       (((foreach fixnum bignum) ratio)
+        (let* ((dy (denominator y))
+               (n (,op (* x dy) (numerator y))))
+          (%make-ratio n dy)))
+       ((ratio integer)
+        (let* ((dx (denominator x))
+               (n (,op (numerator x) (* y dx))))
+          (%make-ratio n dx)))
+       ((ratio ratio)
+        (let* ((nx (numerator x))
+               (dx (denominator x))
+               (ny (numerator y))
+               (dy (denominator y))
+               (g1 (gcd dx dy)))
+          (if (eql g1 1)
+              (%make-ratio (,op (* nx dy) (* dx ny)) (* dx dy))
+              (let* ((t2 (truncate dx g1))
+                     (t1 (,op (* nx (truncate dy g1)) (* t2 ny)))
+                     (g2 (gcd t1 g1)))
+                (cond ((eql t1 0) 0)
+                      ((eql g2 1)
+                       (%make-ratio t1 (* t2 dy)))
+                      (t (let* ((nn (truncate t1 g2))
+                                (t3 (truncate dy g2))
+                                (nd (if (eql t2 1) t3 (* t2 t3))))
+                           (if (eql nd 1) nn (%make-ratio nn nd))))))))))))
+
+(two-arg-+/- two-arg-+ + add-bignums)
+(two-arg-+/- two-arg-- - subtract-bignum)
+
+(defun two-arg-* (x y)
+  (flet ((integer*ratio (x y)
+           (if (eql x 0) 0
+               (let* ((ny (numerator y))
+                      (dy (denominator y))
+                      (gcd (gcd x dy)))
+                 (if (eql gcd 1)
+                     (%make-ratio (* x ny) dy)
+                     (let ((nn (* (truncate x gcd) ny))
+                           (nd (truncate dy gcd)))
+                       (if (eql nd 1)
+                           nn
+                           (%make-ratio nn nd)))))))
+         (complex*real (x y)
+           (canonical-complex (* (realpart x) y) (* (imagpart x) y))))
+    (number-dispatch ((x number) (y number))
+      (float-contagion * x y)
+
+      ((fixnum fixnum) (multiply-fixnums x y))
+      ((bignum fixnum) (multiply-bignum-and-fixnum x y))
+      ((fixnum bignum) (multiply-bignum-and-fixnum y x))
+      ((bignum bignum) (multiply-bignums x y))
+
+      ((complex complex)
+       (let* ((rx (realpart x))
+              (ix (imagpart x))
+              (ry (realpart y))
+              (iy (imagpart y)))
+         (canonical-complex (- (* rx ry) (* ix iy)) (+ (* rx iy) (* ix ry)))))
+      (((foreach bignum fixnum ratio single-float double-float
+                 #+long-float long-float)
+        complex)
+       (complex*real y x))
+      ((complex (or rational float))
+       (complex*real x y))
+
+      (((foreach bignum fixnum) ratio) (integer*ratio x y))
+      ((ratio integer) (integer*ratio y x))
+      ((ratio ratio)
+       (let* ((nx (numerator x))
+              (dx (denominator x))
+              (ny (numerator y))
+              (dy (denominator y))
+              (g1 (gcd nx dy))
+              (g2 (gcd dx ny)))
+         (build-ratio (* (maybe-truncate nx g1)
+                         (maybe-truncate ny g2))
+                      (* (maybe-truncate dx g2)
+                         (maybe-truncate dy g1))))))))
+
+(defun %negate (n)
+  (declare (explicit-check))
+  (number-dispatch ((n number))
+    (((foreach fixnum single-float double-float #+long-float long-float))
+     (%negate n))
+    ((bignum)
+     (negate-bignum n))
+    ((ratio)
+     (%make-ratio (- (numerator n)) (denominator n)))
+    ((complex)
+     (complex (- (realpart n)) (- (imagpart n))))))
+#+end_src
+
+** ...in ABCL
+
+The relevant code seems to be in =abcl/src/org/armedbear/lisp/Primitives.java=
+with =Primitive ADD= being the implementation of the addition operator,
+etc. In this case, the implementation is in Java, and a Lisp symbol
+stores the code.
+
+** ...in Clozure Lisp
+
+The relevant code seems to be in =ccl/level-1/l1-numbers.lisp=.
+Here the arithmetic operators are just plain old functions.
+
+

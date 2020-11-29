@@ -1,0 +1,29 @@
+#+TITLE: Overview
+#+AUTHOR: Alex Nelson
+#+EMAIL: pqnelson@gmail.com
+#+LANGUAGE: en
+#+OPTIONS: H:5
+#+HTML_DOCTYPE: html5
+# Created Saturday November 28, 2020 at 11:30AM
+
+* Introduction
+
+This is an annotated table of contents for the documents in this
+directory.
+
+- =simplify.org= discusses the pattern matching algorithm and some of
+  the simplification rules, which use the aforementioned algorithm
+- =trigonometry.org= reviews the definition of inverse trig functions
+  according to CLTL2
+- =generic-arithmetic.org= examines how Fateman implements generic arithmetic
+- 
+
+* References and Similar Software
+
+- Norvig's [[https://github.com/norvig/paip-lisp/][Paradigms of AI]] are now free online
+- Novak's [[https://www.cs.utexas.edu/users/novak/cgi/physdemod.cgi][Math, Physics problem solver]] is similar to what I'm interested
+  in writing, although restricted and far more simple
+  + ftp://ftp.cs.utexas.edu/pub/novak/glarch/ is the code for the online
+    problem solver
+  + ftp://ftp.cs.utexas.edu/pub/novak/cs381k/isaac/ is the original
+    system Novak wrote, worth studying still
