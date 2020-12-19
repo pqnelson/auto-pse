@@ -1,0 +1,52 @@
+#+TITLE: Notes on Novak's Physics Problem Solver
+#+AUTHOR: Alex Nelson
+#+EMAIL: pqnelson@gmail.com
+#+LANGUAGE: en
+#+OPTIONS: H:5
+#+HTML_DOCTYPE: html5
+# Created Sunday November 29, 2020 at  6:45PM
+
+* Introduction
+
+Gordon Novak has an online [[https://www.cs.utexas.edu/users/novak/cgi/physdemod.cgi][Math/Physics Problem Solver]] which can answer
+a surprising number of questions.
+
+A "map" of the code can be partitioned into two "continents" joined by
+an isthmus. One continent handles the natural language processing, the
+other continent solves the mathematical equations:
+
+1. Natural Language Processing
+   - ~gramcom.lsp~ defines the lexicon and grammar for parsing questions
+     - =(defun parse (sent &optional (nonterminal 's)) ...)=
+   - ~chemgram.lsp~ parses the grammar to setup quantities and equations
+     - ~(defun phys (sent) ...)~ parses and answers physics questions,
+       which is the entry point for the meat of the program
+   - ~atn.lsp~ provides the code for a transition network grammar
+2. Solving the math
+   - ~mathpat.lsp~ defines simplification rules
+   - ~equations.lsp~ tries to solve a system of equations
+     + ~(defun solvobjvar (eqns goalvar defined))~ solves =eqns= for a
+       desired variable, with the "template variables" which have
+       already been =defined= given
+     + =(defun changeobjvar (objtype defined changed goalvar))=
+       calculates the change in the =goalvar= for specified changes in
+       other variables =changed= as specified by the alist given, with
+       the other variables =defined= as such
+   - ~physlaws.lsp~ stores all the different problem templates, and for
+     each template, all the different variants to solve for a given
+     unknown.
+     + The templates appear to have the syntax ~(name (parameters) ((variable unit)*) ((= unknown formula-involving-other-parameters)+))~
+     + It populates the ~equations~ variable with list of =(unknown formula)=
+       equations from the list of templates, associated to the =name=
+   - 
+     
+
+As best as I can tell, the system works by describing "templates" of
+problems, with specific list of variables. Parsing amounts to
+identifying which template to use, and assigns values to the "template
+variables". 
+
+A quirk of style: it seems that Novak opts to write functions like
+=(defun foo (x y) (let (aux-1 aux-2) ...))= instead of using auxiliary
+variables =(defun foo (x y &aux aux-1 aux-2) ...)=.
+
