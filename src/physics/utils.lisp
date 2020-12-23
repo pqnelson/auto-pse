@@ -19,6 +19,12 @@
            energy? power? force? weight? velocity? acceleration?))
 (in-package #:auto-pse.physics.utils)
 
+(define-si-units :clear-existing-units t)
+(unless (pq::has-key "yocto" pq::*unit-prefix-table*)
+  (pq:define-si-units))
+(pq:define-read-macros)
+
+
 (defmacro defdimen (name (qty) base-unit)
   (let ((units (gensym "units-")))
       `(defun ,name (,qty)
